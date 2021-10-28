@@ -1,6 +1,10 @@
 import javax.swing.*;
+import javax.xml.crypto.Data;
+
 import java.awt.*;
 import java.awt.event.*;
+import java.io.IOException;
+import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.Socket;
@@ -9,7 +13,8 @@ import java.net.UnknownHostException;
 
 public class Sender {
 
-    DatagramSocket socket;
+    static DatagramSocket socket_ack;
+    static DatagramSocket socket_data;
     public static void main(String args[]){
         JFrame frame = new JFrame("BoardClient");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -51,7 +56,17 @@ public class Sender {
         alive_button.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed (ActionEvent e){
-                System.out.println("Test");
+                String receiver_ip = server_ip.getText().toString();
+                int receiver_ackPort = Integer.parseInt(ACK_port.getText());
+                int receiver_dataPort = Integer.parseInt(data_port.getText());
+                Boolean status = test_connection(receiver_dataPort, receiver_ackPort, receiver_ip);
+                if (status){
+                    JOptionPane.showMessageDialog(frame, "Connected successfully. You may now send a file.");
+                }
+                else{
+                    JOptionPane.showMessageDialog(frame, "Unable to find host. Please try again.");
+                }
+
             }
         });
     
@@ -89,19 +104,36 @@ public class Sender {
         
         }
 
-        private Boolean connect_to_receiver(int port, String ip){
+        private static Boolean test_connection(int port_data, int port_ack, String ip){
             Boolean connected = true;
+            InetAddress address_ack = null;
             try {
-                InetAddress address = InetAddress.getByName(ip);
-                socket = new DatagramSocket(port, address);
+                address_ack = InetAddress.getByName(ip);
+                socket_ack = new DatagramSocket(port_ack, address_ack);
             } catch (UnknownHostException e) {
                 // TODO Auto-generated catch block
                 e.printStackTrace();
                 connected = false;
-
             } catch (SocketException s){
+                s.printStackTrace();
                 connected = false;
             }
+
+            String test_string = "Test connection to receiver.";
+            DatagramPacket dp = new DatagramPacket(test_string.getBytes(), test_string.length());
+            dp.setAddress(address_ack);
+            dp.setPort(port_data);
+
+            try {
+                socket_ack.send(dp);
+            } catch (IOException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }  
+
+
+
+
             return connected;
         }
 }
