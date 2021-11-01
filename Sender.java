@@ -1,22 +1,24 @@
 import javax.swing.*;
-import javax.xml.crypto.Data;
 
 import java.awt.*;
 import java.awt.event.*;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.Socket;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 
 public class Sender {
 
     static DatagramSocket socket_ack;
     static DatagramSocket socket_data;
+    static Boolean connection_tested = false;
     public static void main(String args[]){
-        JFrame frame = new JFrame("BoardClient");
+        JFrame frame = new JFrame("Sender");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(1000,150);
         
@@ -24,13 +26,13 @@ public class Sender {
         JPanel connection = new JPanel();
         JButton alive_button = new JButton("Is Alive?");
         JTextField server_ip = new JTextField();
-        server_ip.setPreferredSize( new Dimension( 200, 24 ) );
+        server_ip.setPreferredSize(new Dimension( 200, 24 ));
         JLabel ip_label = new JLabel("IP Address: ");
         JTextField ACK_port = new JTextField();
-        ACK_port.setPreferredSize( new Dimension( 200, 24 ) );
+        ACK_port.setPreferredSize(new Dimension( 200, 24 ));
         JLabel port_label = new JLabel("ACK Port: ");
         JTextField data_port = new JTextField();
-        data_port.setPreferredSize( new Dimension( 200, 24 ) );
+        data_port.setPreferredSize(new Dimension( 200, 24 ));
         JLabel data_port_label = new JLabel("Data Port: ");
     
         //Transfer panel.
@@ -61,10 +63,27 @@ public class Sender {
                 int receiver_dataPort = Integer.parseInt(data_port.getText());
                 Boolean status = test_connection(receiver_dataPort, receiver_ackPort, receiver_ip);
                 if (status){
+                    connection_tested = true;
                     JOptionPane.showMessageDialog(frame, "Connected successfully. You may now send a file.");
                 }
                 else{
                     JOptionPane.showMessageDialog(frame, "Unable to find host. Please try again.");
+                }
+
+            }
+        });
+
+        send_button.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed (ActionEvent e){
+                if (!connection_tested){
+                    JOptionPane.showMessageDialog(frame, "Please test your connection before sending a file.");
+                } else{
+                    File f_name = new File(file_name.getText().toString());
+                    byte[] fileByteArray = readFileToByteArray(f_name);
+                    sendFile(socket_data, socket_ack, fileByteArray, address, port);
+                    //Add code here for sending file.
+
                 }
 
             }
@@ -98,18 +117,17 @@ public class Sender {
         frame.getContentPane().add(BorderLayout.SOUTH, input_panel);
     
         frame.setVisible(true);
-
-
-
         
         }
 
+        //Method to test if a host is alive. Sends a ping to the receiver and waits for an acknowledgement.
         private static Boolean test_connection(int port_data, int port_ack, String ip){
             Boolean connected = true;
             InetAddress address_ack = null;
             try {
                 address_ack = InetAddress.getByName(ip);
                 socket_ack = new DatagramSocket(port_ack, address_ack);
+                socket_ack.setSoTimeout(10000);
             } catch (UnknownHostException e) {
                 // TODO Auto-generated catch block
                 e.printStackTrace();
@@ -130,10 +148,106 @@ public class Sender {
                 // TODO Auto-generated catch block
                 e.printStackTrace();
             }  
-
-
-
+            try {
+                byte[] buf = new byte[1024];  
+                dp = new DatagramPacket(buf, 1024);  
+                socket_ack.receive(dp);
+                String str = new String(dp.getData(), 0, dp.getLength());  
+                System.out.println(str);
+                if (str.equals("ACK")){
+                    connected = true;
+                }
+                else{
+                    connected = false;
+                }
+            } catch (Exception e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+                connected = false;
+            }  
 
             return connected;
+        }
+
+        private void sendFile(DatagramSocket socket, DatagramSocket socket_ack, byte[] fileByteArray, InetAddress address, int port) throws IOException {
+            System.out.println("Sending file");
+            int sequenceNumber = 0;
+            boolean flag; //Determine if EOT has been reached.
+            int ackSequence = 0; 
+    
+            for (int i = 0; i < fileByteArray.length; i = i + 1021) {
+                if (sequenceNumber == 0){
+                    sequenceNumber = 1;
+                } else{
+                    sequenceNumber = 0;
+                }
+
+                byte[] message = new byte[1024];
+                //message[0] = (byte) (sequenceNumber >> 8);
+                message[0] = (byte) (sequenceNumber); //Sequence number.
+    
+                if ((i + 1021) >= fileByteArray.length) {
+                    flag = true;
+                    message[1] = (byte) (1); // Embed flag indicating EOT.
+                } else {
+                    flag = false;
+                    message[1] = (byte) (0); // No EOT flag yet.
+                }
+    
+                if (!flag) {
+                    System.arraycopy(fileByteArray, i, message, 3, 1021);
+                } else {
+                    //Last datagram.
+                    System.arraycopy(fileByteArray, i, message, 3, fileByteArray.length - i);
+                }
+    
+                DatagramPacket sendPacket = new DatagramPacket(message, message.length, address, port);
+                socket.send(sendPacket); // Sending the data
+                System.out.println("Sent: Sequence number = " + sequenceNumber);
+    
+                boolean ackRec;
+    
+                while (true) {
+                    byte[] ack = new byte[2]; // Create another packet for datagram ACK
+                    DatagramPacket ackpacket = new DatagramPacket(ack, ack.length);
+    
+                    try {
+                        socket_ack.setSoTimeout(50);
+                        socket_ack.receive(ackpacket);
+                        ackSequence = (ack[0]);
+                        ackRec = true;
+                    } catch (SocketTimeoutException e) {
+                        //ACK not received.
+                        System.out.println("Socket timed out waiting for ack");
+                        ackRec = false; 
+                    }
+    
+                    // If the package was received correctly next packet can be sent
+                    if ((ackSequence == sequenceNumber) && (ackRec)) {
+                        System.out.println("Ack received: Sequence Number = " + ackSequence);
+                        break;
+                    } // Package was not received, so we resend it
+                    else {
+                        socket.send(sendPacket);
+                        System.out.println("Resending: Sequence Number = " + sequenceNumber);
+                    }
+                }
+            }
+        }
+
+        private static byte[] readFileToByteArray(File file) {
+            FileInputStream fis = null;
+            // Creating a byte array using the length of the file
+            // file.length returns long which is cast to int
+            byte[] bArray = new byte[(int) file.length()];
+            try {
+                fis = new FileInputStream(file);
+                fis.read(bArray);
+                fis.close();
+    
+            } catch (IOException ioExp) {
+                ioExp.printStackTrace();
+            }
+            return bArray;
         }
 }

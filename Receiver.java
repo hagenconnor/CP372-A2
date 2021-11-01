@@ -32,7 +32,13 @@ public class Receiver {
         try {
             socket_data.receive(dp);
             String str = new String(dp.getData(), 0, dp.getLength());  
-            System.out.println(str);  
+            System.out.println(str);
+            
+            String text_back = "ACK";
+            dp = new DatagramPacket(text_back.getBytes(), text_back.length());
+            dp.setAddress(address_ack);
+            dp.setPort(port_ack);
+            socket_data.send(dp);
         } catch (IOException e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
