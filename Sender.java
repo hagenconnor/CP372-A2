@@ -16,6 +16,7 @@ public class Sender {
 
     static DatagramSocket socket_ack;
     static DatagramSocket socket_data;
+    static InetAddress dest_address;
     static Boolean connection_tested = false;
     public static void main(String args[]){
         JFrame frame = new JFrame("Sender");
@@ -55,33 +56,26 @@ public class Sender {
         JButton send_button = new JButton("SEND");
         JCheckBox reliable_toggle = new JCheckBox("Reliable");
 
-        alive_button.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed (ActionEvent e){
-                String receiver_ip = server_ip.getText().toString();
-                int receiver_ackPort = Integer.parseInt(ACK_port.getText());
-                int receiver_dataPort = Integer.parseInt(data_port.getText());
-                Boolean status = test_connection(receiver_dataPort, receiver_ackPort, receiver_ip);
-                if (status){
-                    connection_tested = true;
-                    JOptionPane.showMessageDialog(frame, "Connected successfully. You may now send a file.");
-                }
-                else{
-                    JOptionPane.showMessageDialog(frame, "Unable to find host. Please try again.");
-                }
-
-            }
-        });
 
         send_button.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed (ActionEvent e){
-                if (!connection_tested){
+                if (connection_tested){ //Fix this.
                     JOptionPane.showMessageDialog(frame, "Please test your connection before sending a file.");
                 } else{
-                    File f_name = new File(file_name.getText().toString());
-                    byte[] fileByteArray = readFileToByteArray(f_name);
-                    sendFile(socket_data, socket_ack, fileByteArray, address, port);
+                    try{
+                        socket_data = new DatagramSocket();
+
+                        socket_ack = new DatagramSocket(Integer.parseInt(ACK_port.getText()), dest_address);
+
+                        File f_name = new File(file_name.getText().toString());
+                        byte[] fileByteArray = readFileToByteArray(f_name);
+                        InetAddress add = InetAddress.getByName(server_ip.getText().toString());
+                        int port = Integer.parseInt(data_port.getText());
+                        sendFile(socket_data, socket_ack, fileByteArray, add, port);
+                    } catch (Exception v){
+                        v.printStackTrace();
+                    }
                     //Add code here for sending file.
 
                 }
@@ -120,58 +114,9 @@ public class Sender {
         
         }
 
-        //Method to test if a host is alive. Sends a ping to the receiver and waits for an acknowledgement.
-        private static Boolean test_connection(int port_data, int port_ack, String ip){
-            Boolean connected = true;
-            InetAddress address_ack = null;
-            try {
-                address_ack = InetAddress.getByName(ip);
-                socket_ack = new DatagramSocket(port_ack, address_ack);
-                socket_ack.setSoTimeout(10000);
-            } catch (UnknownHostException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-                connected = false;
-            } catch (SocketException s){
-                s.printStackTrace();
-                connected = false;
-            }
-
-            String test_string = "Test connection to receiver.";
-            DatagramPacket dp = new DatagramPacket(test_string.getBytes(), test_string.length());
-            dp.setAddress(address_ack);
-            dp.setPort(port_data);
-
-            try {
-                socket_ack.send(dp);
-            } catch (IOException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }  
-            try {
-                byte[] buf = new byte[1024];  
-                dp = new DatagramPacket(buf, 1024);  
-                socket_ack.receive(dp);
-                String str = new String(dp.getData(), 0, dp.getLength());  
-                System.out.println(str);
-                if (str.equals("ACK")){
-                    connected = true;
-                }
-                else{
-                    connected = false;
-                }
-            } catch (Exception e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-                connected = false;
-            }  
-
-            return connected;
-        }
-
-        private void sendFile(DatagramSocket socket, DatagramSocket socket_ack, byte[] fileByteArray, InetAddress address, int port) throws IOException {
+        private static void sendFile(DatagramSocket socket, DatagramSocket socket_ack, byte[] fileByteArray, InetAddress address, int port) throws IOException {
             System.out.println("Sending file");
-            int sequenceNumber = 0;
+            int sequenceNumber = 1;
             boolean flag; //Determine if EOT has been reached.
             int ackSequence = 0; 
     
@@ -202,6 +147,8 @@ public class Sender {
                 }
     
                 DatagramPacket sendPacket = new DatagramPacket(message, message.length, address, port);
+                System.out.println("Destination address: " + address);
+                System.out.println("Destination port: " + port);
                 socket.send(sendPacket); // Sending the data
                 System.out.println("Sent: Sequence number = " + sequenceNumber);
     
