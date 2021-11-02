@@ -21,6 +21,7 @@ public class Sender {
     static int packet_count = 0;
     static JTextArea results;
     static Boolean connection_tested = false;
+    static Boolean reliable = true;
     public static void main(String args[]){
         JFrame frame = new JFrame("Sender");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -57,8 +58,9 @@ public class Sender {
         JTextField timeout = new JTextField();
         timeout.setPreferredSize( new Dimension( 200, 24 ) );
         JButton send_button = new JButton("SEND");
-        JCheckBox reliable_toggle = new JCheckBox("Reliable");
+        JCheckBox reliable_toggle = new JCheckBox("Reliable", true);
 
+        
 
         send_button.addActionListener(new ActionListener() {
             @Override
@@ -79,7 +81,7 @@ public class Sender {
 
                         File file = new File(file_name.getText().toString());
                         byte[] fileArray = readFileToByteArray(file);
-                        sendFile(socket, socket_ack, fileArray, dest_address, port_data);
+                        sendFile(reliable, socket, socket_ack, fileArray, dest_address, port_data);
                         //socket.close();
                         //socket_ack.close();
                     } catch (Exception v){
@@ -91,6 +93,17 @@ public class Sender {
 
             }
         });
+
+        reliable_toggle.addItemListener(new ItemListener() {
+            public void itemStateChanged(ItemEvent e) {
+               if (e.getStateChange() == ItemEvent.DESELECTED){
+                reliable = false;
+               } else{
+                reliable = true;
+               }
+            }
+         });
+    
     
     
         //Connection panel.
@@ -123,65 +136,83 @@ public class Sender {
         
         }
 
-        private static void sendFile(DatagramSocket socket, DatagramSocket socket_ack, byte[] fileByteArray, InetAddress address, int port) throws IOException {
-            System.out.println("Sending file");
-            int sequenceNumber = 0; // For order
-            boolean flag; // To see if we got to the end of the file
-            int ackSequence = 0; // To see if the datagram was received correctly
+        private static void sendFile(Boolean reliable, DatagramSocket socket_data, DatagramSocket socket_ack, byte[] fileByteArray, InetAddress address, int port) throws IOException {
+            int sequenceNumber = 0; //Sequence number, alternates between 0 and 1.
+            boolean EOTflag; //Flag for end of transmission.
+            int ackSequence = 0; //Used for checking ack against sequence number.
+            int dropPacket = 0; //Counter used for unreliable simulation.
     
             for (int i = 0; i < fileByteArray.length; i = i + 1021) {
                 packet_count+=1;
+                dropPacket += 1;
+                
                 results.setText(Integer.toString(packet_count));
 
-                // Create message
-                byte[] message = new byte[1024]; // First two bytes of the data are for control (datagram integrity and order)
-                message[0] = (byte) (sequenceNumber >> 8);
-                message[1] = (byte) (sequenceNumber);
-    
-                if ((i + 1021) >= fileByteArray.length) { // Have we reached the end of file?
-                    flag = true;
-                    message[2] = (byte) (1); // We reached the end of the file (last datagram to be send)
+                // Create message of size 1024 bytes.
+                byte[] message = new byte[1024];
+                message[0] = (byte) (sequenceNumber >> 8); //Bit shift
+                message[1] = (byte) (sequenceNumber); //Add sequence number.
+                
+                //Check if reached end of file.
+                if ((i + 1021) >= fileByteArray.length) {
+                    EOTflag = true;
+                    message[2] = (byte) (1);
                 } else {
-                    flag = false;
-                    message[2] = (byte) (0); // We haven't reached the end of the file, still sending datagrams
+                    EOTflag = false;
+                    message[2] = (byte) (0);
                 }
     
-                if (!flag) {
+                if (!EOTflag) {
                     System.arraycopy(fileByteArray, i, message, 3, 1021);
-                } else { // If it is the last datagram
+                } else {
                     System.arraycopy(fileByteArray, i, message, 3, fileByteArray.length - i);
                 }
-    
-                DatagramPacket sendPacket = new DatagramPacket(message, message.length, address, port); // The data to be sent
-                socket.send(sendPacket); // Sending the data
-                System.out.println("Sent: Sequence number = " + sequenceNumber);
-    
-                boolean ackRec; // Was the datagram received?
+
+                DatagramPacket sendPacket = new DatagramPacket(message, message.length, address, port); 
+
+                if ((!reliable) & dropPacket != 10){
+                    socket_data.send(sendPacket);
+                    System.out.println("Sent: Sequence number = " + sequenceNumber);
+                } else if (!(reliable) & dropPacket == 10){
+                    dropPacket = 0;
+                    System.out.println("Dropped: Sequence number = " + sequenceNumber);
+                } else if (reliable){
+                    //Create packet of data to be sent.
+                    socket_data.send(sendPacket);
+                    System.out.println("Sent: Sequence number = " + sequenceNumber);
+
+                }
+
+                boolean ACKreceived;
     
                 while (true) {
-                    byte[] ack = new byte[2]; // Create another packet for datagram ackknowledgement
-                    DatagramPacket ackpack = new DatagramPacket(ack, ack.length);
+                    // Create a packet for datagram ack
+                    byte[] ack = new byte[2]; 
+                    DatagramPacket ackPacket = new DatagramPacket(ack, ack.length);
     
                     try {
-                        socket_ack.setSoTimeout(socketTimeout); // Waiting for the server to send the ack
-                        socket_ack.receive(ackpack);
-                        ackSequence = ((ack[0] & 0xff) << 8) + (ack[1] & 0xff); // Figuring the sequence number
-                        ackRec = true; // We received the ack
+                        //Timeout for ACK; set by GUI.
+                        socket_ack.setSoTimeout(socketTimeout);
+                        socket_ack.receive(ackPacket); //Receive on ack socket.
+                        //Extract sequence number.
+                        ackSequence = ((ack[0] & 0xff) << 8) + (ack[1] & 0xff);
+                        ACKreceived = true;
                     } catch (SocketTimeoutException e) {
                         System.out.println("Socket timed out waiting for ack");
-                        ackRec = false; // We did not receive an ack
+                        ACKreceived = false;
                     }
     
-                    // If the package was received correctly next packet can be sent
-                    if ((ackSequence == sequenceNumber) && (ackRec)) {
+                    //If all is correct, break to send next packet, otherwise resend.
+                    if ((ackSequence == sequenceNumber) && (ACKreceived)) {
                         System.out.println("Ack received: Sequence Number = " + ackSequence);
                         break;
-                    } // Package was not received, so we resend it
+                    }
                     else {
-                        socket.send(sendPacket);
+                        socket_data.send(sendPacket); //Resend packet via data socket.
                         System.out.println("Resending: Sequence Number = " + sequenceNumber);
                     }
                 }
+                //Alternate sequence number.
                 if (sequenceNumber == 0){
                     sequenceNumber = 1;
                 } else{
@@ -189,20 +220,18 @@ public class Sender {
                 }
             }
         }
-
+        //Private helper method to read a file into a byte array for sending datagrams.
         private static byte[] readFileToByteArray(File file) {
             FileInputStream fis = null;
-            // Creating a byte array using the length of the file
-            // file.length returns long which is cast to int
-            byte[] bArray = new byte[(int) file.length()];
+            byte[] array = new byte[(int) file.length()];
             try {
                 fis = new FileInputStream(file);
-                fis.read(bArray);
+                fis.read(array);
                 fis.close();
     
-            } catch (IOException ioExp) {
-                ioExp.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-            return bArray;
+            return array;
         }
 }
