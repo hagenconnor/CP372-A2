@@ -17,6 +17,9 @@ public class Sender {
     static DatagramSocket socket_ack;
     static DatagramSocket socket_data;
     static InetAddress dest_address;
+    static int socketTimeout;
+    static int packet_count = 0;
+    static JTextArea results;
     static Boolean connection_tested = false;
     public static void main(String args[]){
         JFrame frame = new JFrame("Sender");
@@ -42,7 +45,7 @@ public class Sender {
         JTextArea file_name = new JTextArea();
         file_name.setPreferredSize( new Dimension(200,24));
         JLabel results_label = new JLabel("Current sent in-order packets: ");
-        JTextArea results = new JTextArea();
+        results = new JTextArea();
         results.setPreferredSize( new Dimension(200,24) );
         results.setLineWrap(true);
         results.setEditable(false);
@@ -64,15 +67,21 @@ public class Sender {
                     JOptionPane.showMessageDialog(frame, "Please test your connection before sending a file.");
                 } else{
                     try{
-                        socket_data = new DatagramSocket();
+                        DatagramSocket socket = new DatagramSocket();
+                        String receiverAddress = server_ip.getText().toString();
+                        int port_data = Integer.parseInt(data_port.getText());
+                        dest_address = InetAddress.getByName(receiverAddress);
 
-                        socket_ack = new DatagramSocket(Integer.parseInt(ACK_port.getText()), dest_address);
+                        int port_ack = Integer.parseInt(ACK_port.getText());
+                        DatagramSocket socket_ack = new DatagramSocket(port_ack);
+                        socketTimeout = Integer.parseInt(timeout.getText());
 
-                        File f_name = new File(file_name.getText().toString());
-                        byte[] fileByteArray = readFileToByteArray(f_name);
-                        InetAddress add = InetAddress.getByName(server_ip.getText().toString());
-                        int port = Integer.parseInt(data_port.getText());
-                        sendFile(socket_data, socket_ack, fileByteArray, add, port);
+
+                        File file = new File(file_name.getText().toString());
+                        byte[] fileArray = readFileToByteArray(file);
+                        sendFile(socket, socket_ack, fileArray, dest_address, port_data);
+                        //socket.close();
+                        //socket_ack.close();
                     } catch (Exception v){
                         v.printStackTrace();
                     }
@@ -116,57 +125,51 @@ public class Sender {
 
         private static void sendFile(DatagramSocket socket, DatagramSocket socket_ack, byte[] fileByteArray, InetAddress address, int port) throws IOException {
             System.out.println("Sending file");
-            int sequenceNumber = 1;
-            boolean flag; //Determine if EOT has been reached.
-            int ackSequence = 0; 
+            int sequenceNumber = 0; // For order
+            boolean flag; // To see if we got to the end of the file
+            int ackSequence = 0; // To see if the datagram was received correctly
     
             for (int i = 0; i < fileByteArray.length; i = i + 1021) {
-                if (sequenceNumber == 0){
-                    sequenceNumber = 1;
-                } else{
-                    sequenceNumber = 0;
-                }
+                packet_count+=1;
+                results.setText(Integer.toString(packet_count));
 
-                byte[] message = new byte[1024];
-                //message[0] = (byte) (sequenceNumber >> 8);
-                message[0] = (byte) (sequenceNumber); //Sequence number.
+                // Create message
+                byte[] message = new byte[1024]; // First two bytes of the data are for control (datagram integrity and order)
+                message[0] = (byte) (sequenceNumber >> 8);
+                message[1] = (byte) (sequenceNumber);
     
-                if ((i + 1021) >= fileByteArray.length) {
+                if ((i + 1021) >= fileByteArray.length) { // Have we reached the end of file?
                     flag = true;
-                    message[1] = (byte) (1); // Embed flag indicating EOT.
+                    message[2] = (byte) (1); // We reached the end of the file (last datagram to be send)
                 } else {
                     flag = false;
-                    message[1] = (byte) (0); // No EOT flag yet.
+                    message[2] = (byte) (0); // We haven't reached the end of the file, still sending datagrams
                 }
     
                 if (!flag) {
                     System.arraycopy(fileByteArray, i, message, 3, 1021);
-                } else {
-                    //Last datagram.
+                } else { // If it is the last datagram
                     System.arraycopy(fileByteArray, i, message, 3, fileByteArray.length - i);
                 }
     
-                DatagramPacket sendPacket = new DatagramPacket(message, message.length, address, port);
-                System.out.println("Destination address: " + address);
-                System.out.println("Destination port: " + port);
+                DatagramPacket sendPacket = new DatagramPacket(message, message.length, address, port); // The data to be sent
                 socket.send(sendPacket); // Sending the data
                 System.out.println("Sent: Sequence number = " + sequenceNumber);
     
-                boolean ackRec;
+                boolean ackRec; // Was the datagram received?
     
                 while (true) {
-                    byte[] ack = new byte[2]; // Create another packet for datagram ACK
-                    DatagramPacket ackpacket = new DatagramPacket(ack, ack.length);
+                    byte[] ack = new byte[2]; // Create another packet for datagram ackknowledgement
+                    DatagramPacket ackpack = new DatagramPacket(ack, ack.length);
     
                     try {
-                        socket_ack.setSoTimeout(50);
-                        socket_ack.receive(ackpacket);
-                        ackSequence = (ack[0]);
-                        ackRec = true;
+                        socket_ack.setSoTimeout(socketTimeout); // Waiting for the server to send the ack
+                        socket_ack.receive(ackpack);
+                        ackSequence = ((ack[0] & 0xff) << 8) + (ack[1] & 0xff); // Figuring the sequence number
+                        ackRec = true; // We received the ack
                     } catch (SocketTimeoutException e) {
-                        //ACK not received.
                         System.out.println("Socket timed out waiting for ack");
-                        ackRec = false; 
+                        ackRec = false; // We did not receive an ack
                     }
     
                     // If the package was received correctly next packet can be sent
@@ -178,6 +181,11 @@ public class Sender {
                         socket.send(sendPacket);
                         System.out.println("Resending: Sequence Number = " + sequenceNumber);
                     }
+                }
+                if (sequenceNumber == 0){
+                    sequenceNumber = 1;
+                } else{
+                    sequenceNumber = 0;
                 }
             }
         }
