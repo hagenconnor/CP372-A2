@@ -65,7 +65,7 @@ public class Sender {
         send_button.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed (ActionEvent e){
-                if (connection_tested){ //Fix this.
+                if (!connection_tested){
                     JOptionPane.showMessageDialog(frame, "Please test your connection before sending a file.");
                 } else{
                     try{
@@ -82,15 +82,14 @@ public class Sender {
                         File file = new File(file_name.getText().toString());
                         byte[] fileArray = readFileToByteArray(file);
                         sendFile(reliable, socket, socket_ack, fileArray, dest_address, port_data);
-                        //socket.close();
-                        //socket_ack.close();
+                        JOptionPane.showMessageDialog(frame, "File sent.");
+                        connection_tested = false;
+                        socket.close();
+                        socket_ack.close();
                     } catch (Exception v){
                         v.printStackTrace();
                     }
-                    //Add code here for sending file.
-
                 }
-
             }
         });
 
@@ -103,6 +102,24 @@ public class Sender {
                }
             }
          });
+
+         alive_button.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed (ActionEvent e){
+                String receiver_ip = server_ip.getText().toString();
+                int receiver_ackPort = Integer.parseInt(ACK_port.getText());
+                int receiver_dataPort = Integer.parseInt(data_port.getText());
+                Boolean status = test_connection(receiver_dataPort, receiver_ackPort, receiver_ip);
+                if (status){
+                    connection_tested = true;
+                    JOptionPane.showMessageDialog(frame, "Connected successfully. You may now send a file.");
+                }
+                else{
+                    JOptionPane.showMessageDialog(frame, "Unable to find host. Please try again.");
+                }
+        
+            }
+        });
     
     
     
@@ -142,7 +159,7 @@ public class Sender {
             int ackSequence = 0; //Used for checking ack against sequence number.
             int dropPacket = 0; //Counter used for unreliable simulation.
     
-            for (int i = 0; i < fileByteArray.length; i = i + 1021) {
+            for (int i = 0; i < fileByteArray.length; i = i + 1022) {
                 packet_count+=1;
                 dropPacket += 1;
                 
@@ -150,36 +167,37 @@ public class Sender {
 
                 // Create message of size 1024 bytes.
                 byte[] message = new byte[1024];
-                message[0] = (byte) (sequenceNumber >> 8); //Bit shift
-                message[1] = (byte) (sequenceNumber); //Add sequence number.
+                //message[0] = (byte) (sequenceNumber >> 8); //Bit shift
+                message[0] = (byte) (sequenceNumber); //Add sequence number.
                 
                 //Check if reached end of file.
-                if ((i + 1021) >= fileByteArray.length) {
+                if ((i + 1022) >= fileByteArray.length) {
                     EOTflag = true;
-                    message[2] = (byte) (1);
+                    message[1] = (byte) (1);
                 } else {
                     EOTflag = false;
-                    message[2] = (byte) (0);
+                    message[1] = (byte) (0);
                 }
     
                 if (!EOTflag) {
                     System.arraycopy(fileByteArray, i, message, 3, 1021);
                 } else {
                     System.arraycopy(fileByteArray, i, message, 3, fileByteArray.length - i);
+                    System.out.println("-----Last Transmission.-----");
                 }
 
                 DatagramPacket sendPacket = new DatagramPacket(message, message.length, address, port); 
 
                 if ((!reliable) & dropPacket != 10){
                     socket_data.send(sendPacket);
-                    System.out.println("Sent: Sequence number = " + sequenceNumber);
+                    System.out.println("Sent: Sequence number: " + sequenceNumber);
                 } else if (!(reliable) & dropPacket == 10){
                     dropPacket = 0;
-                    System.out.println("Dropped: Sequence number = " + sequenceNumber);
+                    System.out.println("Dropped: Sequence number: " + sequenceNumber);
                 } else if (reliable){
                     //Create packet of data to be sent.
                     socket_data.send(sendPacket);
-                    System.out.println("Sent: Sequence number = " + sequenceNumber);
+                    System.out.println("Sent: Sequence number: " + sequenceNumber);
 
                 }
 
@@ -195,21 +213,22 @@ public class Sender {
                         socket_ack.setSoTimeout(socketTimeout);
                         socket_ack.receive(ackPacket); //Receive on ack socket.
                         //Extract sequence number.
-                        ackSequence = ((ack[0] & 0xff) << 8) + (ack[1] & 0xff);
+                        //ackSequence = ((ack[0] & 0xff) << 8) + (ack[1] & 0xff);
+                        ackSequence = ack[0];
                         ACKreceived = true;
                     } catch (SocketTimeoutException e) {
-                        System.out.println("Socket timed out waiting for ack");
+                        System.out.println("Socket timed out. No ack received.");
                         ACKreceived = false;
                     }
     
                     //If all is correct, break to send next packet, otherwise resend.
                     if ((ackSequence == sequenceNumber) && (ACKreceived)) {
-                        System.out.println("Ack received: Sequence Number = " + ackSequence);
+                        System.out.println("Ack received. Sequence Number: " + ackSequence);
                         break;
                     }
                     else {
                         socket_data.send(sendPacket); //Resend packet via data socket.
-                        System.out.println("Resending: Sequence Number = " + sequenceNumber);
+                        System.out.println("Resending packet: Sequence Number: " + sequenceNumber);
                     }
                 }
                 //Alternate sequence number.
@@ -234,4 +253,54 @@ public class Sender {
             }
             return array;
         }
+
+//Method to test if a host is alive. Sends a ping to the receiver and waits for an acknowledgement.
+ private static Boolean test_connection(int port_data, int port_ack, String ip){
+    Boolean connected = true;
+    InetAddress address_ack = null;
+    try {
+        address_ack = InetAddress.getByName(ip);
+        socket_ack = new DatagramSocket(port_ack);
+        socket_ack.setSoTimeout(10000);
+    } catch (UnknownHostException e) {
+        // TODO Auto-generated catch block
+        e.printStackTrace();
+        connected = false;
+    } catch (SocketException s){
+        s.printStackTrace();
+        connected = false;
+    }
+
+    String test_string = "Test connection to receiver.";
+    DatagramPacket dp = new DatagramPacket(test_string.getBytes(), test_string.length());
+    dp.setAddress(address_ack);
+    dp.setPort(port_data);
+
+    try {
+        socket_ack.send(dp);
+    } catch (IOException e) {
+        // TODO Auto-generated catch block
+        e.printStackTrace();
+    }  
+    try {
+        byte[] buf = new byte[1024];  
+        dp = new DatagramPacket(buf, 1024);  
+        socket_ack.receive(dp);
+        String str = new String(dp.getData(), 0, dp.getLength());  
+        System.out.println(str);
+        if (str.equals("ACK")){
+            connected = true;
+            socket_ack.close();
+        }
+        else{
+            connected = false;
+        }
+    } catch (Exception e) {
+        // TODO Auto-generated catch block
+        e.printStackTrace();
+        connected = false;
+    }  
+
+    return connected;
+}
 }
