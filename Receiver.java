@@ -41,9 +41,9 @@ public class Receiver {
         System.out.println("Receiving file");
         boolean flag; // Have we reached end of file
         int sequenceNumber = 0; // Order of sequences
-        int foundLast = 1; // The las sequence found
-        boolean transmitting = false;
-        long start = 0;
+        int foundLast = 1; // The last sequence found
+        boolean transmitting = false; //Boolean for packet loss simulation.
+        long start = 0; //Timer
         
         while (true) {
             byte[] message = new byte[1024]; // Where the data from the received datagram is stored
@@ -56,21 +56,14 @@ public class Receiver {
                 start = System.currentTimeMillis();
                 transmitting = true;
             }
-            message = receivedPacket.getData(); // Data to be written to the file
-
-            // Get port and address for sending acknowledgment
+            message = receivedPacket.getData();
             InetAddress address = sender;
-            //InetAddress address = receivedPacket.getAddress();
-            //int port = receivedPacket.getPort();
 
             // Retrieve sequence number
             sequenceNumber = message[0];
-            //sequenceNumber = ((message[0] & 0xff) << 8) + (message[1] & 0xff);
             // Check if we reached last datagram (end of file)
             flag = (message[1] & 0xff) == 1;
             
-            // If sequence number is the last seen + 1, then it is correct
-            // We get the data from the message and write the ack that it has been received correctly
             if (foundLast == 0){
                 if (sequenceNumber == 1) {
 
@@ -137,7 +130,7 @@ public class Receiver {
         // the datagram packet to be sent
         DatagramPacket acknowledgement = new DatagramPacket(ackPacket, ackPacket.length, address, port);
         socket.send(acknowledgement);
-        System.out.println("Sent ack: Sequence Number = " + foundLast);
+        System.out.println("Sent ack: Sequence Number: " + foundLast);
     }
     private static void waitForTest(DatagramSocket socket, DatagramSocket socket_ack){
         byte[] buf = new byte[1024];  
