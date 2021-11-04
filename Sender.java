@@ -160,14 +160,14 @@ public class Sender {
             int dropPacket = 0; //Counter used for unreliable simulation.
     
             for (int i = 0; i < fileByteArray.length; i = i + 1022) {
+                //Increase packet count and simulation counters.
                 packet_count+=1;
                 dropPacket += 1;
                 
                 results.setText(Integer.toString(packet_count));
 
-                // Create message of size 1024 bytes.
+                // Create message of size 1024 bytes - first 2 bytes are for sequence number and EOT flag.
                 byte[] message = new byte[1024];
-                //message[0] = (byte) (sequenceNumber >> 8); //Bit shift
                 message[0] = (byte) (sequenceNumber); //Add sequence number.
                 
                 //Check if reached end of file.
@@ -189,13 +189,15 @@ public class Sender {
                 DatagramPacket sendPacket = new DatagramPacket(message, message.length, address, port); 
 
                 if ((!reliable) & dropPacket != 10){
+                    //Unreliable transmission simulation -- drop every 10th packet.
                     socket_data.send(sendPacket);
                     System.out.println("Sent: Sequence number: " + sequenceNumber);
                 } else if (!(reliable) & dropPacket == 10){
+                    //Unreliable transmission simulation -- drop every 10th packet.
                     dropPacket = 0;
                     System.out.println("Dropped: Sequence number: " + sequenceNumber);
                 } else if (reliable){
-                    //Create packet of data to be sent.
+                    //Reliable transmission -- don't simulate packet loss.
                     socket_data.send(sendPacket);
                     System.out.println("Sent: Sequence number: " + sequenceNumber);
 
@@ -213,7 +215,6 @@ public class Sender {
                         socket_ack.setSoTimeout(socketTimeout);
                         socket_ack.receive(ackPacket); //Receive on ack socket.
                         //Extract sequence number.
-                        //ackSequence = ((ack[0] & 0xff) << 8) + (ack[1] & 0xff);
                         ackSequence = ack[0];
                         ACKreceived = true;
                     } catch (SocketTimeoutException e) {
