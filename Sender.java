@@ -158,13 +158,13 @@ public class Sender {
             boolean EOTflag; //Flag for end of transmission.
             int ackSequence = 0; //Used for checking ack against sequence number.
             int dropPacket = 0; //Counter used for unreliable simulation.
+            packet_count = 0;
     
             for (int i = 0; i < fileByteArray.length; i = i + 1022) {
                 //Increase packet count and simulation counters.
                 packet_count+=1;
                 dropPacket += 1;
                 
-                results.setText(Integer.toString(packet_count));
 
                 // Create message of size 1024 bytes - first 2 bytes are for sequence number and EOT flag.
                 byte[] message = new byte[1024];
@@ -228,10 +228,12 @@ public class Sender {
                         break;
                     }
                     else {
+                        packet_count+=1;
                         socket_data.send(sendPacket); //Resend packet via data socket.
                         System.out.println("Resending packet: Sequence Number: " + sequenceNumber);
                     }
                 }
+                results.setText(Integer.toString(packet_count));
                 //Alternate sequence number.
                 if (sequenceNumber == 0){
                     sequenceNumber = 1;
